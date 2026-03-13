@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>True Country Size Explorer</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header>
+        <h1>True Country Size Explorer</h1>
+        <p>
+          This map uses the <strong>Equal Earth projection</strong>, which preserves area so
+          countries are shown in size proportions that match reality better than Mercator.
+          Select a country and drag its outline on top of others to compare scale directly.
+        </p>
+      </header>
+
+      <section class="controls" aria-label="Map controls">
+        <label for="country-select">Country</label>
+        <select id="country-select">
+          <option value="">Select a country…</option>
+        </select>
+        <button id="clear-overlays" type="button">Clear overlays</button>
+      </section>
+
+      <section class="map-panel">
+        <svg id="map" role="img" aria-label="Interactive world map"></svg>
+      </section>
+
+      <section class="legend">
+        <h2>How to use</h2>
+        <ol>
+          <li>Click a country or choose it from the dropdown.</li>
+          <li>Drag the highlighted outline and place it on another country.</li>
+          <li>Repeat with multiple countries to compare true area visually.</li>
+        </ol>
+        <p id="details">Select a country to view details.</p>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
