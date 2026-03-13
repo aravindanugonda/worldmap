@@ -21,11 +21,11 @@ body {
 }
 
 .app-shell {
-  max-width: 1200px;
+  width: min(1800px, 100vw);
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 1rem;
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 header,
@@ -35,7 +35,7 @@ header,
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 1rem;
+  padding: 0.9rem;
 }
 
 h1,
@@ -77,9 +77,14 @@ button:hover {
   border-color: var(--accent);
 }
 
+.map-panel {
+  padding: 0.5rem;
+}
+
 #map {
   width: 100%;
-  min-height: 600px;
+  height: min(78vh, 1000px);
+  min-height: 720px;
   display: block;
   background: #f2f7ff;
   border-radius: 8px;
@@ -137,4 +142,11 @@ button:hover {
   background: var(--accent-soft);
   border-radius: 8px;
   padding: 0.6rem;
+}
+
+@media (max-width: 900px) {
+  #map {
+    min-height: 620px;
+    height: 72vh;
+  }
 }

@@ -1,5 +1,5 @@
-const width = 1100;
-const height = 620;
+const width = 1600;
+const height = 920;
 const earthSurfaceKm2 = 510_072_000;
 const maxRenderableLatitude = 84;
 
@@ -11,9 +11,10 @@ const svg = d3
 const projection = d3.geoMercator().fitSize([width, height], { type: 'Sphere' });
 const path = d3.geoPath(projection);
 
-const sphereLayer = svg.append('g');
-const baseLayer = svg.append('g');
-const overlayLayer = svg.append('g');
+const viewportLayer = svg.append('g').attr('class', 'viewport-layer');
+const sphereLayer = viewportLayer.append('g');
+const baseLayer = viewportLayer.append('g');
+const overlayLayer = viewportLayer.append('g');
 
 const select = document.getElementById('country-select');
 const details = document.getElementById('details');
@@ -150,6 +151,21 @@ select.addEventListener('change', (event) => {
   }
 });
 
+function setupZoom() {
+  const zoom = d3
+    .zoom()
+    .scaleExtent([1, 12])
+    .translateExtent([
+      [-width * 1.2, -height * 1.2],
+      [width * 2.2, height * 2.2],
+    ])
+    .on('zoom', (event) => {
+      viewportLayer.attr('transform', event.transform);
+    });
+
+  svg.call(zoom).call(zoom.transform, d3.zoomIdentity.scale(1.15));
+}
+
 async function init() {
   sphereLayer
     .append('path')
@@ -177,6 +193,7 @@ async function init() {
     .append('title')
     .text((d) => countryName(d));
 
+  setupZoom();
   updateDetails(null);
 }
 
