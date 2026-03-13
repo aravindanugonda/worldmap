@@ -1,15 +1,17 @@
 const width = 1100;
 const height = 620;
 const earthSurfaceKm2 = 510_072_000;
+const maxRenderableLatitude = 84;
 
 const svg = d3
   .select('#map')
   .attr('viewBox', `0 0 ${width} ${height}`)
   .attr('preserveAspectRatio', 'xMidYMid meet');
 
-const projection = d3.geoEqualEarth().fitSize([width, height], { type: 'Sphere' });
+const projection = d3.geoMercator().fitSize([width, height], { type: 'Sphere' });
 const path = d3.geoPath(projection);
 
+const sphereLayer = svg.append('g');
 const baseLayer = svg.append('g');
 const overlayLayer = svg.append('g');
 
@@ -18,7 +20,6 @@ const details = document.getElementById('details');
 const clearButton = document.getElementById('clear-overlays');
 
 let countries = [];
-let activeFeature = null;
 
 function steradianToKm2(steradianArea) {
   return (steradianArea / (4 * Math.PI)) * earthSurfaceKm2;
@@ -32,47 +33,83 @@ function countryName(feature) {
   return feature.properties.name || feature.properties.admin || `Country ${feature.id}`;
 }
 
-function updateDetails(feature) {
+function toRadians(degrees) {
+  return (degrees * Math.PI) / 180;
+}
+
+function mercatorCorrectionScale(sourceLat, currentLat) {
+  const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.05);
+  const currentCos = Math.max(Math.cos(toRadians(currentLat)), 0.05);
+  return sourceCos / currentCos;
+}
+
+function clampLatitude(latitude) {
+  return Math.max(-maxRenderableLatitude, Math.min(maxRenderableLatitude, latitude));
+}
+
+function updateDetails(feature, dynamicLat = null) {
   if (!feature) {
     details.textContent = 'Select a country to view details.';
     return;
   }
 
   const km2 = steradianToKm2(d3.geoArea(feature));
-  const centroid = d3.geoCentroid(feature);
-  const [lon, lat] = centroid;
-  details.textContent = `${countryName(feature)} · Approx area: ${formatKm2(
+  const [, sourceLat] = d3.geoCentroid(feature);
+  const currentLat = dynamicLat ?? sourceLat;
+  const correction = mercatorCorrectionScale(sourceLat, currentLat);
+
+  details.textContent = `${countryName(feature)} · True area: ${formatKm2(
     km2,
-  )} km² · Centroid: ${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
+  )} km² · Overlay latitude: ${currentLat.toFixed(1)}° · Mercator correction: ${correction.toFixed(
+    2,
+  )}×`;
+}
+
+function applyOverlayTransform(group, state) {
+  group.attr(
+    'transform',
+    `translate(${state.tx},${state.ty}) translate(${state.cx},${state.cy}) scale(${state.scale}) translate(${-state.cx},${-state.cy})`,
+  );
 }
 
 function createDraggableOverlay(feature) {
-  const countryPath = baseLayer.selectAll('.country');
-  countryPath.classed('selected', (d) => d === feature);
+  baseLayer.selectAll('.country').classed('selected', (d) => d === feature);
 
-  const overlay = overlayLayer
-    .append('path')
-    .datum(feature)
-    .attr('class', 'overlay-country')
-    .attr('d', path)
-    .attr('transform', null)
-    .raise();
+  const [cx, cy] = path.centroid(feature);
+  const [, sourceLat] = d3.geoCentroid(feature);
 
-  let dx = 0;
-  let dy = 0;
+  const state = {
+    tx: 0,
+    ty: 0,
+    cx,
+    cy,
+    sourceLat,
+    scale: 1,
+  };
 
-  overlay.call(
-    d3
-      .drag()
-      .on('drag', (event) => {
-        dx += event.dx;
-        dy += event.dy;
-        overlay.attr('transform', `translate(${dx}, ${dy})`);
-      })
-      .on('end', () => {
-        overlay.raise();
-      }),
+  const group = overlayLayer.append('g').datum(feature).attr('class', 'overlay-group');
+
+  group.append('path').attr('class', 'overlay-country').attr('d', path);
+
+  group.call(
+    d3.drag().on('drag', (event) => {
+      state.tx += event.dx;
+      state.ty += event.dy;
+
+      const screenPoint = [state.cx + state.tx, state.cy + state.ty];
+      const inverted = projection.invert(screenPoint);
+
+      if (inverted) {
+        const currentLat = clampLatitude(inverted[1]);
+        state.scale = mercatorCorrectionScale(state.sourceLat, currentLat);
+        updateDetails(feature, currentLat);
+      }
+
+      applyOverlayTransform(group, state);
+    }),
   );
+
+  applyOverlayTransform(group, state);
 }
 
 function populateSelector(features) {
@@ -89,7 +126,6 @@ function populateSelector(features) {
 }
 
 function setActiveCountry(feature) {
-  activeFeature = feature;
   select.value = String(feature.id);
   updateDetails(feature);
   createDraggableOverlay(feature);
@@ -98,7 +134,6 @@ function setActiveCountry(feature) {
 clearButton.addEventListener('click', () => {
   overlayLayer.selectAll('*').remove();
   baseLayer.selectAll('.country').classed('selected', false);
-  activeFeature = null;
   select.value = '';
   updateDetails(null);
 });
@@ -116,7 +151,14 @@ select.addEventListener('change', (event) => {
 });
 
 async function init() {
+  sphereLayer
+    .append('path')
+    .datum({ type: 'Sphere' })
+    .attr('class', 'sphere')
+    .attr('d', path);
+
   const topology = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+
   countries = topojson
     .feature(topology, topology.objects.countries)
     .features.filter((feature) => countryName(feature) !== 'Antarctica');
@@ -135,7 +177,7 @@ async function init() {
     .append('title')
     .text((d) => countryName(d));
 
-  updateDetails(activeFeature);
+  updateDetails(null);
 }
 
 init().catch((error) => {

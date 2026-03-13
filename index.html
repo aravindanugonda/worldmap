@@ -13,9 +13,9 @@
       <header>
         <h1>True Country Size Explorer</h1>
         <p>
-          This map uses the <strong>Equal Earth projection</strong>, which preserves area so
-          countries are shown in size proportions that match reality better than Mercator.
-          Select a country and drag its outline on top of others to compare scale directly.
+          The base map is Mercator (like most web maps), but draggable overlays are
+          <strong>latitude-corrected</strong> while you move them north/south. This gives a much
+          truer visual size comparison between countries.
         </p>
       </header>
 
@@ -34,9 +34,12 @@
       <section class="legend">
         <h2>How to use</h2>
         <ol>
-          <li>Click a country or choose it from the dropdown.</li>
-          <li>Drag the highlighted outline and place it on another country.</li>
-          <li>Repeat with multiple countries to compare true area visually.</li>
+          <li>Pick a country from the dropdown (or click one on the map).</li>
+          <li>Drag the dashed outline onto another region.</li>
+          <li>
+            As you drag north/south, overlay scale updates automatically to compensate for
+            Mercator distortion.
+          </li>
         </ol>
         <p id="details">Select a country to view details.</p>
       </section>

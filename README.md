@@ -1,16 +1,25 @@
 # True Country Size Explorer
 
-An interactive world map UI that uses an **equal-area projection** (Equal Earth) so country sizes are represented proportionally.
+An interactive world map UI for **true country size comparison**.
 
-## What it does
+## What changed to make size comparison more accurate
 
-- Renders a world map with an equal-area projection to avoid the common Mercator size distortion.
-- Lets you click or select a country and create a draggable outline overlay.
-- Supports dropping multiple overlays over other countries to visually compare true size.
+This app now uses a **Mercator base map + latitude-corrected draggable overlays**.
+
+- Mercator is kept as the reference map because it is familiar.
+- When you drag an overlay north/south, its size is automatically scaled by a Mercator correction factor.
+- This compensates for the latitude distortion that makes high-latitude countries look larger than they are.
+
+That means comparisons like Africa vs Russia are much closer to real-world proportions when you drag overlays to the same latitude.
+
+## Features
+
+- Click/select a country to create a draggable overlay.
+- Drag overlays across the map; overlay size auto-corrects with latitude.
+- Create multiple overlays for direct side-by-side comparisons.
+- Country details include true area (km²), current overlay latitude, and correction factor.
 
 ## Run locally
-
-Because this is a static app, any simple static server works.
 
 ```bash
 python3 -m http.server 4173
@@ -31,4 +40,4 @@ Then open `http://localhost:4173`.
 
 ### Option 2: render.yaml blueprint
 
-This repository includes a `render.yaml` to deploy as a static site. After connecting the repo in Render, use **Blueprint** deployment.
+This repository includes a `render.yaml` for static deployment via Render Blueprint.

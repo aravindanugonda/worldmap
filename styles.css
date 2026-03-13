@@ -81,8 +81,14 @@ button:hover {
   width: 100%;
   min-height: 600px;
   display: block;
-  background: #eaf2ff;
+  background: #f2f7ff;
   border-radius: 8px;
+}
+
+.sphere {
+  fill: #eaf2ff;
+  stroke: #c7ddff;
+  stroke-width: 1px;
 }
 
 .country {
@@ -102,10 +108,10 @@ button:hover {
 }
 
 .overlay-country {
-  fill: rgba(37, 99, 235, 0.18);
+  fill: rgba(37, 99, 235, 0.2);
   stroke: var(--accent);
   stroke-width: 1.2px;
-  stroke-dasharray: 5 4;
+  stroke-dasharray: 6 4;
   cursor: grab;
 }
 
