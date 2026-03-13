@@ -1,0 +1,5 @@
+services:
+  - type: web
+    name: true-country-size-explorer
+    runtime: static
+    staticPublishPath: .
