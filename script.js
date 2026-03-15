@@ -127,13 +127,14 @@ function createDraggableOverlay(feature) {
   const overlayGroup = overlayLayer.append('g').datum(overlayData).attr('class', 'overlay-group');
   const overlayPath = overlayGroup.append('path').attr('class', 'overlay-country').attr('d', path(feature));
 
-  // Accumulate drag deltas in viewport space. Re-deriving the pivot from path.centroid
-  // each frame causes northward drift because the 2D projected centroid and the
-  // spherical geo-centroid diverge for large countries — the error compounds every event.
-  // Accumulating (dx, dy) directly gives a stable, drift-free reference.
-  const initialCentroid = path.centroid(feature);
-  let pivotX = isFinite(initialCentroid[0]) ? initialCentroid[0] : projection(sourceCentroid)[0];
-  let pivotY = isFinite(initialCentroid[1]) ? initialCentroid[1] : projection(sourceCentroid)[1];
+  // Use projection(geo-centroid) as the initial pivot, not path.centroid(feature).
+  // For high-latitude or antimeridian-crossing countries (Russia, Greenland), the 2D
+  // path centroid diverges from the projected geo-centroid — Russia in particular renders
+  // as two split halves at the antimeridian, giving a meaningless path.centroid.
+  // Starting from projection(sourceCentroid) keeps the pivot consistent with where
+  // translatedFeature places the shape, so the first drag event doesn't jump.
+  // Subsequent deltas are accumulated directly (no per-frame recomputation) to avoid drift.
+  let [pivotX, pivotY] = projection(sourceCentroid);
 
   function applyScale() {
     overlayGroup.attr(
