@@ -6,12 +6,12 @@ const maxRenderableLatitude = 80;
 const svg = d3
   .select('#map')
   .attr('viewBox', `0 0 ${width} ${height}`)
-  .attr('preserveAspectRatio', 'xMidYMid meet');
+  .attr('preserveAspectRatio', 'xMidYMid slice');
 
 const projection = d3.geoMercator().fitExtent(
   [
-    [20, 20],
-    [width - 20, height - 20],
+    [0, 0],
+    [width, height],
   ],
   { type: 'Sphere' },
 );
@@ -56,11 +56,14 @@ function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
 }
 
+// Correct Mercator scaling: ratio of cosines gives the true-size correction.
+// When moving a country from sourceLat to targetLat, the Mercator projection
+// stretches latitudes by 1/cos(lat). To display at true relative size we
+// multiply by cos(targetLat)/cos(sourceLat).
 function linearMercatorScale(sourceLat, targetLat) {
   const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.08);
   const targetCos = Math.max(Math.cos(toRadians(targetLat)), 0.08);
-  const raw = targetCos / sourceCos;
-  return Math.max(0.2, Math.min(4, raw));
+  return Math.max(0.1, Math.min(10, targetCos / sourceCos));
 }
 
 function translateCoordinates(coords, dLon, dLat) {
@@ -96,9 +99,7 @@ function updateDetails(feature, currentLat = null) {
   const centroid = d3.geoCentroid(feature);
   const lat = currentLat ?? centroid[1];
 
-  details.textContent = `${countryName(feature)} · True area: ${formatKm2(
-    km2,
-  )} km² · Overlay latitude: ${lat.toFixed(1)}°`;
+  details.textContent = `${countryName(feature)} · True area: ${formatKm2(km2)} km² · Overlay latitude: ${lat.toFixed(1)}°`;
 }
 
 function createDraggableOverlay(feature) {
@@ -119,6 +120,7 @@ function createDraggableOverlay(feature) {
 
   function applyScale() {
     const centroid = path.centroid(overlayData.transformedFeature);
+    if (!isFinite(centroid[0]) || !isFinite(centroid[1])) return;
     overlayGroup.attr(
       'transform',
       `translate(${centroid[0]},${centroid[1]}) scale(${overlayData.scale}) translate(${-centroid[0]},${-centroid[1]})`,
@@ -132,9 +134,7 @@ function createDraggableOverlay(feature) {
       const nextScreen = [cx + event.dx * zoomFactor, cy + event.dy * zoomFactor];
       const nextLonLat = projection.invert(nextScreen);
 
-      if (!nextLonLat) {
-        return;
-      }
+      if (!nextLonLat) return;
 
       targetLon = wrapLongitude(nextLonLat[0]);
       targetLat = clampLatitude(nextLonLat[1]);
@@ -178,14 +178,10 @@ clearButton.addEventListener('click', () => {
 
 select.addEventListener('change', (event) => {
   const selectedId = event.target.value;
-  if (!selectedId) {
-    return;
-  }
+  if (!selectedId) return;
 
   const feature = countries.find((d) => String(d.id) === selectedId);
-  if (feature) {
-    setActiveCountry(feature);
-  }
+  if (feature) setActiveCountry(feature);
 });
 
 function latitudeLine(lat) {
@@ -200,19 +196,23 @@ function latitudeLine(lat) {
 }
 
 function renderLatitudeGuides() {
+  // Background graticule grid
   const graticule = d3.geoGraticule().step([20, 10]);
   guidesLayer.append('path').datum(graticule()).attr('class', 'graticule').attr('d', path);
 
+  // Major named latitude lines
   const special = [
     { lat: 0, className: 'latitude-special latitude-equator', label: 'Equator (0°)' },
     { lat: 23.5, className: 'latitude-special latitude-tropic', label: 'Tropic of Cancer (23.5°N)' },
     { lat: -23.5, className: 'latitude-special latitude-tropic', label: 'Tropic of Capricorn (23.5°S)' },
+    { lat: 66.5, className: 'latitude-special latitude-arctic', label: 'Arctic Circle (66.5°N)' },
+    { lat: -66.5, className: 'latitude-special latitude-arctic', label: 'Antarctic Circle (66.5°S)' },
   ];
 
   special.forEach((line) => {
     guidesLayer.append('path').datum(latitudeLine(line.lat)).attr('class', line.className).attr('d', path);
 
-    const labelPoint = projection([-168, line.lat]);
+    const labelPoint = projection([-175, line.lat]);
     if (labelPoint) {
       guidesLayer
         .append('text')
@@ -223,16 +223,37 @@ function renderLatitudeGuides() {
     }
   });
 
-  const latitudeMarkers = [-60, -40, -20, 20, 40, 60];
-  latitudeMarkers.forEach((lat) => {
-    const labelPoint = projection([170, lat]);
-    if (labelPoint) {
+  // Horizontal latitude lines every 10 degrees with labels on both sides
+  const latMarkers = d3.range(-70, 71, 10).filter((l) => l !== 0 && l !== 23.5 && l !== -23.5);
+  latMarkers.forEach((lat) => {
+    // Draw the line
+    guidesLayer
+      .append('path')
+      .datum(latitudeLine(lat))
+      .attr('class', 'latitude-line')
+      .attr('d', path);
+
+    // Label on left side
+    const leftPoint = projection([-175, lat]);
+    if (leftPoint) {
       guidesLayer
         .append('text')
         .attr('class', 'latitude-label')
-        .attr('x', labelPoint[0] - 42)
-        .attr('y', labelPoint[1] - 2)
-        .text(`${lat > 0 ? `${lat}°N` : `${Math.abs(lat)}°S`}`);
+        .attr('x', leftPoint[0] + 4)
+        .attr('y', leftPoint[1] - 3)
+        .text(lat > 0 ? `${lat}°N` : `${Math.abs(lat)}°S`);
+    }
+
+    // Label on right side
+    const rightPoint = projection([172, lat]);
+    if (rightPoint) {
+      guidesLayer
+        .append('text')
+        .attr('class', 'latitude-label')
+        .attr('x', rightPoint[0] - 4)
+        .attr('y', rightPoint[1] - 3)
+        .attr('text-anchor', 'end')
+        .text(lat > 0 ? `${lat}°N` : `${Math.abs(lat)}°S`);
     }
   });
 }
@@ -242,8 +263,8 @@ function setupZoom() {
     .zoom()
     .scaleExtent([1, 10])
     .translateExtent([
-      [-width * 1.2, -height * 1.2],
-      [width * 2.2, height * 2.2],
+      [-width * 0.5, -height * 0.5],
+      [width * 1.5, height * 1.5],
     ])
     .on('zoom', (event) => {
       currentZoom.transform = event.transform;
@@ -272,9 +293,7 @@ async function init() {
     .join('path')
     .attr('class', 'country')
     .attr('d', path)
-    .on('click', (_, feature) => {
-      setActiveCountry(feature);
-    })
+    .on('click', (_, feature) => setActiveCountry(feature))
     .append('title')
     .text((d) => countryName(d));
 

@@ -71,6 +71,7 @@ button {
 
 button {
   cursor: pointer;
+  white-space: nowrap;
 }
 
 button:hover {
@@ -85,7 +86,7 @@ button:hover {
   border-radius: 8px;
   padding: 0.5rem 0.65rem;
   flex: 1;
-  min-width: 280px;
+  min-width: 200px;
 }
 
 .map-panel {
@@ -99,6 +100,7 @@ button:hover {
   display: block;
   background: #f2f7ff;
   border-radius: 8px;
+  overflow: hidden;
 }
 
 .sphere {
@@ -111,13 +113,21 @@ button:hover {
   fill: none;
   stroke: #b6c8e6;
   stroke-width: 0.6px;
-  stroke-opacity: 0.5;
+  stroke-opacity: 0.4;
+}
+
+/* Regular horizontal latitude lines every 10° */
+.latitude-line {
+  fill: none;
+  stroke: #94a3b8;
+  stroke-width: 0.7px;
+  stroke-opacity: 0.6;
 }
 
 .latitude-special {
   fill: none;
-  stroke-width: 1.2px;
-  stroke-dasharray: 5 4;
+  stroke-width: 1.5px;
+  stroke-dasharray: 6 4;
 }
 
 .latitude-equator {
@@ -128,13 +138,19 @@ button:hover {
   stroke: #7c3aed;
 }
 
+.latitude-arctic {
+  stroke: #0891b2;
+  stroke-dasharray: 4 5;
+}
+
 .latitude-label {
   fill: #4b5563;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   paint-order: stroke;
   stroke: #f2f7ff;
   stroke-width: 3px;
+  pointer-events: none;
 }
 
 .country {
