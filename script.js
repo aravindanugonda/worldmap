@@ -8,281 +8,245 @@ const svg = d3
   .attr('viewBox', `0 0 ${width} ${height}`)
   .attr('preserveAspectRatio', 'xMidYMid slice');
 
-const projection = d3.geoMercator().fitExtent(
-  [
-    [0, 0],
-    [width, height],
-  ],
-  { type: 'Sphere' },
-);
-
+const projection = d3.geoMercator().fitExtent([[0, 0], [width, height]], { type: 'Sphere' });
 const path = d3.geoPath(projection);
 const currentZoom = { transform: d3.zoomIdentity };
 
 const viewportLayer = svg.append('g').attr('class', 'viewport-layer');
-const sphereLayer = viewportLayer.append('g');
-const guidesLayer = viewportLayer.append('g');
-const baseLayer = viewportLayer.append('g');
-const overlayLayer = viewportLayer.append('g');
-
-const select = document.getElementById('country-select');
-const details = document.getElementById('details');
-const clearButton = document.getElementById('clear-overlays');
+const sphereLayer   = viewportLayer.append('g');
+const guidesLayer   = viewportLayer.append('g');
+const baseLayer     = viewportLayer.append('g');
+const overlayLayer  = viewportLayer.append('g');
 
 let countries = [];
+let activeOverlay = null; // track the single active overlay
 
-function steradianToKm2(steradianArea) {
-  return (steradianArea / (4 * Math.PI)) * earthSurfaceKm2;
+// ── Util ─────────────────────────────────────────────────────────────────────
+
+function steradianToKm2(a) { return (a / (4 * Math.PI)) * earthSurfaceKm2; }
+function formatKm2(v) { return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(v) + ' km²'; }
+function countryName(f) { return f.properties.name || f.properties.admin || `Country ${f.id}`; }
+function wrapLon(lon) { const w = ((lon + 180) % 360 + 360) % 360 - 180; return w === -180 ? 180 : w; }
+function clampLat(lat) { return Math.max(-maxRenderableLatitude, Math.min(maxRenderableLatitude, lat)); }
+function toRad(d) { return d * Math.PI / 180; }
+
+// Mercator x-scale correction: a country at sourceLat has true east-west extent
+// proportional to cos(sourceLat). When placed at targetLat, scale x by cos(sourceLat)/cos(targetLat)
+// so the rendered width matches the true relative size at targetLat's Mercator scale.
+function mercatorXScale(sourceLat, targetLat) {
+  const sc = Math.max(Math.cos(toRad(sourceLat)), 0.08);
+  const tc = Math.max(Math.cos(toRad(targetLat)), 0.08);
+  return Math.max(0.1, Math.min(8, sc / tc));
 }
 
-function formatKm2(value) {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+function translateCoords(coords, dLon, dLat) {
+  if (typeof coords[0] === 'number')
+    return [wrapLon(coords[0] + dLon), Math.max(-89.9, Math.min(89.9, coords[1] + dLat))];
+  return coords.map(c => translateCoords(c, dLon, dLat));
 }
 
-function countryName(feature) {
-  return feature.properties.name || feature.properties.admin || `Country ${feature.id}`;
-}
-
-function wrapLongitude(lon) {
-  const wrapped = ((lon + 180) % 360 + 360) % 360 - 180;
-  return wrapped === -180 ? 180 : wrapped;
-}
-
-function clampLatitude(latitude) {
-  return Math.max(-maxRenderableLatitude, Math.min(maxRenderableLatitude, latitude));
-}
-
-function toRadians(degrees) {
-  return (degrees * Math.PI) / 180;
-}
-
-// On Mercator, pixel_width = R·Δλ (latitude-independent), so a country at sourceLat
-// spanning Δλ degrees represents cos(sourceLat)·Δλ km east-west. After translating
-// coordinates to targetLat, D3 still renders width as R·Δλ, which now looks like a
-// country spanning Δλ km at the equator — too wide by 1/cos(sourceLat). To show the
-// true east-west extent at targetLat's Mercator scale, scale x by cos(sourceLat)/cos(targetLat).
-//
-// Height (latitude arc) is independent of longitude, and after translating to targetLat
-// D3 renders Δφ/cos(targetLat) — exactly the same distortion as any native country at
-// targetLat — so no y correction is needed (yScale = 1).
-function mercatorScales(sourceLat, targetLat) {
-  const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.08);
-  const targetCos = Math.max(Math.cos(toRadians(targetLat)), 0.08);
+function translatedFeature(orig, tLon, tLat) {
+  const [sLon, sLat] = d3.geoCentroid(orig);
   return {
-    xScale: Math.max(0.1, Math.min(8, sourceCos / targetCos)),
-    yScale: 1,
-  };
-}
-
-function translateCoordinates(coords, dLon, dLat) {
-  if (typeof coords[0] === 'number') {
-    return [wrapLongitude(coords[0] + dLon), clampLatitude(coords[1] + dLat)];
-  }
-  return coords.map((point) => translateCoordinates(point, dLon, dLat));
-}
-
-function translatedFeature(originalFeature, targetLon, targetLat) {
-  const [sourceLon, sourceLat] = d3.geoCentroid(originalFeature);
-  const dLon = targetLon - sourceLon;
-  const dLat = targetLat - sourceLat;
-
-  return {
-    type: 'Feature',
-    id: originalFeature.id,
-    properties: { ...originalFeature.properties },
+    type: 'Feature', id: orig.id,
+    properties: { ...orig.properties },
     geometry: {
-      ...originalFeature.geometry,
-      coordinates: translateCoordinates(originalFeature.geometry.coordinates, dLon, dLat),
+      ...orig.geometry,
+      coordinates: translateCoords(orig.geometry.coordinates, tLon - sLon, tLat - sLat),
     },
   };
 }
 
-function updateDetails(feature, currentLat = null) {
-  if (!feature) {
-    details.textContent = 'Select a country to view details.';
-    return;
-  }
+// ── UI update ─────────────────────────────────────────────────────────────────
 
-  const km2 = steradianToKm2(d3.geoArea(feature));
-  const centroid = d3.geoCentroid(feature);
-  const lat = currentLat ?? centroid[1];
+function updateCard(feature, currentLat) {
+  const card = document.getElementById('country-card');
+  if (!feature) { card.hidden = true; return; }
 
-  details.textContent = `${countryName(feature)} · True area: ${formatKm2(km2)} km² · Overlay latitude: ${lat.toFixed(1)}°`;
+  card.hidden = false;
+  document.getElementById('card-name').textContent = countryName(feature);
+  document.getElementById('card-area').textContent = formatKm2(steradianToKm2(d3.geoArea(feature)));
+
+  const lat = currentLat ?? d3.geoCentroid(feature)[1];
+  document.getElementById('card-lat').textContent = `${lat.toFixed(1)}°${lat >= 0 ? 'N' : 'S'}`;
+
+  // Mercator area distortion at the overlay's current latitude.
+  // Both x and y are scaled by 1/cos(lat), so apparent area = true area / cos²(lat).
+  const cosLat = Math.max(Math.cos(toRad(lat)), 0.08);
+  const distortion = 1 / (cosLat * cosLat);
+  document.getElementById('card-scale').textContent =
+    distortion < 1.05 ? '1×'
+                      : `${distortion.toFixed(1)}× larger`;
+
+  // Rotate educational tip based on country
+  const tips = [
+    `Greenland looks huge on Mercator, but is actually smaller than Australia.`,
+    `Russia appears almost twice as large as Africa on Mercator, but Africa is actually larger.`,
+    `The Mercator projection preserves shape (conformal) but distorts area.`,
+    `At 60°N, a country appears twice as wide as it truly is compared to the equator.`,
+    `Gerardus Mercator created his projection in 1569 — primarily for sea navigation.`,
+  ];
+  const tip = tips[Math.abs(feature.id ?? 0) % tips.length];
+  document.getElementById('edu-text').textContent = tip;
+}
+
+// ── Overlay ───────────────────────────────────────────────────────────────────
+
+function removeActiveOverlay() {
+  if (activeOverlay) { activeOverlay.remove(); activeOverlay = null; }
+  baseLayer.selectAll('.country').classed('selected', false);
 }
 
 function createDraggableOverlay(feature) {
-  baseLayer.selectAll('.country').classed('selected', (d) => d === feature);
+  removeActiveOverlay();
+  baseLayer.selectAll('.country').classed('selected', d => d === feature);
 
-  const sourceCentroid = d3.geoCentroid(feature);
-  const sourceLat = sourceCentroid[1];
-  let [targetLon, targetLat] = sourceCentroid;
+  const [sourceLon, sourceLat] = d3.geoCentroid(feature);
+  let targetLon = sourceLon;
+  let targetLat = sourceLat;
 
-  const overlayData = {
-    originalFeature: feature,
-    transformedFeature: feature,
-    xScale: 1,
-    yScale: 1,
-  };
+  const g = overlayLayer.append('g');
+  activeOverlay = g.node();
 
-  const overlayGroup = overlayLayer.append('g').datum(overlayData).attr('class', 'overlay-group');
-  const overlayPath = overlayGroup.append('path').attr('class', 'overlay-country').attr('d', path(feature));
+  const overlayPath = g.append('path').attr('class', 'overlay-country').attr('d', path(feature));
 
-  // Use projection(geo-centroid) as the initial pivot, not path.centroid(feature).
-  // For high-latitude or antimeridian-crossing countries (Russia, Greenland), the 2D
-  // path centroid diverges from the projected geo-centroid — Russia in particular renders
-  // as two split halves at the antimeridian, giving a meaningless path.centroid.
-  // Starting from projection(sourceCentroid) keeps the pivot consistent with where
-  // translatedFeature places the shape, so the first drag event doesn't jump.
-  // Subsequent deltas are accumulated directly (no per-frame recomputation) to avoid drift.
-  let [pivotX, pivotY] = projection(sourceCentroid);
+  // Pivot in SVG-viewBox coordinates (the stable unzoomed space).
+  let [pivotX, pivotY] = projection([sourceLon, sourceLat]);
+  let xScale = 1;
 
-  function applyScale() {
-    overlayGroup.attr(
-      'transform',
-      `translate(${pivotX},${pivotY}) scale(${overlayData.xScale},${overlayData.yScale}) translate(${-pivotX},${-pivotY})`,
-    );
+  // Drag anchor: recorded once on pointerdown in the same stable SVG-viewBox space.
+  // We use absolute positions (not accumulated deltas) so that changes to the
+  // overlay group's xScale transform between frames don't corrupt g.getScreenCTM()
+  // and cause the "sliding past" phenomenon for high-latitude targets.
+  let anchorSVG = null;
+  let anchorPivot = null;
+
+  function applyTransform() {
+    g.attr('transform',
+      `translate(${pivotX},${pivotY}) scale(${xScale},1) translate(${-pivotX},${-pivotY})`);
   }
 
   overlayPath.call(
-    d3.drag().on('drag', (event) => {
-      const zoomFactor = 1 / currentZoom.transform.k;
-      pivotX += event.dx * zoomFactor;
-      pivotY += event.dy * zoomFactor;
+    d3.drag()
+      .on('start', event => {
+        event.sourceEvent.stopPropagation();
+        document.getElementById('map-hint').classList.add('hidden');
+        // Capture mouse position in the fixed SVG-root coordinate space.
+        anchorSVG = d3.pointer(event.sourceEvent, svg.node());
+        anchorPivot = [pivotX, pivotY];
+      })
+      .on('drag', event => {
+        // Current mouse in SVG-root coordinates — unaffected by xScale changes.
+        const [mx, my] = d3.pointer(event.sourceEvent, svg.node());
+        const { k } = currentZoom.transform;
 
-      const nextLonLat = projection.invert([pivotX, pivotY]);
-      if (!nextLonLat) return;
+        // Convert SVG-root delta → viewportLayer/pre-zoom space (divide by k).
+        pivotX = anchorPivot[0] + (mx - anchorSVG[0]) / k;
+        pivotY = anchorPivot[1] + (my - anchorSVG[1]) / k;
 
-      targetLon = wrapLongitude(nextLonLat[0]);
-      targetLat = clampLatitude(nextLonLat[1]);
+        const ll = projection.invert([pivotX, pivotY]);
+        if (!ll) return;
 
-      overlayData.transformedFeature = translatedFeature(feature, targetLon, targetLat);
-      ({ xScale: overlayData.xScale, yScale: overlayData.yScale } = mercatorScales(sourceLat, targetLat));
-      overlayPath.attr('d', path(overlayData.transformedFeature));
-      applyScale();
-      updateDetails(feature, targetLat);
-    }),
+        targetLon = wrapLon(ll[0]);
+        targetLat = clampLat(ll[1]);
+
+        const moved = translatedFeature(feature, targetLon, targetLat);
+        xScale = mercatorXScale(sourceLat, targetLat);
+
+        overlayPath.attr('d', path(moved));
+        applyTransform();
+        updateCard(feature, targetLat);
+      }),
   );
 
-  applyScale();
+  applyTransform();
+  updateCard(feature, targetLat);
 }
 
-function populateSelector(features) {
-  const sorted = [...features].sort((a, b) =>
-    countryName(a).localeCompare(countryName(b), undefined, { sensitivity: 'base' }),
-  );
+// ── Selector ──────────────────────────────────────────────────────────────────
 
-  for (const feature of sorted) {
-    const option = document.createElement('option');
-    option.value = feature.id;
-    option.textContent = countryName(feature);
-    select.appendChild(option);
-  }
+function populateSelector(features) {
+  const sel = document.getElementById('country-select');
+  [...features]
+    .sort((a, b) => countryName(a).localeCompare(countryName(b), undefined, { sensitivity: 'base' }))
+    .forEach(f => {
+      const o = document.createElement('option');
+      o.value = f.id;
+      o.textContent = countryName(f);
+      sel.appendChild(o);
+    });
 }
 
 function setActiveCountry(feature) {
-  select.value = String(feature.id);
-  updateDetails(feature);
+  document.getElementById('country-select').value = String(feature.id);
   createDraggableOverlay(feature);
 }
 
-clearButton.addEventListener('click', () => {
-  overlayLayer.selectAll('*').remove();
-  baseLayer.selectAll('.country').classed('selected', false);
-  select.value = '';
-  updateDetails(null);
+// ── Events ────────────────────────────────────────────────────────────────────
+
+document.getElementById('clear-overlays').addEventListener('click', () => {
+  removeActiveOverlay();
+  document.getElementById('country-select').value = '';
+  updateCard(null);
+  document.getElementById('map-hint').classList.remove('hidden');
 });
 
-select.addEventListener('change', (event) => {
-  const selectedId = event.target.value;
-  if (!selectedId) return;
-
-  const feature = countries.find((d) => String(d.id) === selectedId);
-  if (feature) setActiveCountry(feature);
+document.getElementById('country-select').addEventListener('change', e => {
+  const f = countries.find(d => String(d.id) === e.target.value);
+  if (f) setActiveCountry(f);
 });
 
-function latitudeLine(lat) {
+// ── Latitude guides ───────────────────────────────────────────────────────────
+
+function latLine(lat) {
   return {
-    type: 'Feature',
-    properties: { latitude: lat },
-    geometry: {
-      type: 'LineString',
-      coordinates: d3.range(-180, 181, 1).map((lon) => [lon, lat]),
-    },
+    type: 'Feature', properties: {},
+    geometry: { type: 'LineString', coordinates: d3.range(-180, 181, 1).map(lon => [lon, lat]) },
   };
 }
 
-function renderLatitudeGuides() {
-  // Background graticule grid
-  const graticule = d3.geoGraticule().step([20, 10]);
-  guidesLayer.append('path').datum(graticule()).attr('class', 'graticule').attr('d', path);
+function renderGuides() {
+  guidesLayer.append('path')
+    .datum(d3.geoGraticule().step([20, 10])())
+    .attr('class', 'graticule').attr('d', path);
 
-  // Major named latitude lines
-  const special = [
-    { lat: 0, className: 'latitude-special latitude-equator', label: 'Equator (0°)' },
-    { lat: 23.5, className: 'latitude-special latitude-tropic', label: 'Tropic of Cancer (23.5°N)' },
-    { lat: -23.5, className: 'latitude-special latitude-tropic', label: 'Tropic of Capricorn (23.5°S)' },
-    { lat: 66.5, className: 'latitude-special latitude-arctic', label: 'Arctic Circle (66.5°N)' },
-    { lat: -66.5, className: 'latitude-special latitude-arctic', label: 'Antarctic Circle (66.5°S)' },
+  const specials = [
+    { lat: 0,     cls: 'latitude-special latitude-equator', label: 'Equator' },
+    { lat: 23.5,  cls: 'latitude-special latitude-tropic',  label: 'Tropic of Cancer' },
+    { lat: -23.5, cls: 'latitude-special latitude-tropic',  label: 'Tropic of Capricorn' },
+    { lat: 66.5,  cls: 'latitude-special latitude-arctic',  label: 'Arctic Circle' },
+    { lat: -66.5, cls: 'latitude-special latitude-arctic',  label: 'Antarctic Circle' },
   ];
 
-  special.forEach((line) => {
-    guidesLayer.append('path').datum(latitudeLine(line.lat)).attr('class', line.className).attr('d', path);
-
-    const labelPoint = projection([-175, line.lat]);
-    if (labelPoint) {
-      guidesLayer
-        .append('text')
-        .attr('class', 'latitude-label')
-        .attr('x', labelPoint[0] + 6)
-        .attr('y', labelPoint[1] - 4)
-        .text(line.label);
+  specials.forEach(({ lat, cls, label }) => {
+    guidesLayer.append('path').datum(latLine(lat)).attr('class', cls).attr('d', path);
+    const pt = projection([-175, lat]);
+    if (pt) {
+      guidesLayer.append('text').attr('class', 'latitude-label')
+        .attr('x', pt[0] + 6).attr('y', pt[1] - 5).text(label);
     }
   });
 
-  // Horizontal latitude lines every 10 degrees with labels on both sides
-  const latMarkers = d3.range(-70, 71, 10).filter((l) => l !== 0 && l !== 23.5 && l !== -23.5);
-  latMarkers.forEach((lat) => {
-    // Draw the line
-    guidesLayer
-      .append('path')
-      .datum(latitudeLine(lat))
-      .attr('class', 'latitude-line')
-      .attr('d', path);
-
-    // Label on left side
-    const leftPoint = projection([-175, lat]);
-    if (leftPoint) {
-      guidesLayer
-        .append('text')
-        .attr('class', 'latitude-label')
-        .attr('x', leftPoint[0] + 4)
-        .attr('y', leftPoint[1] - 3)
-        .text(lat > 0 ? `${lat}°N` : `${Math.abs(lat)}°S`);
-    }
-
-    // Label on right side
-    const rightPoint = projection([172, lat]);
-    if (rightPoint) {
-      guidesLayer
-        .append('text')
-        .attr('class', 'latitude-label')
-        .attr('x', rightPoint[0] - 4)
-        .attr('y', rightPoint[1] - 3)
-        .attr('text-anchor', 'end')
-        .text(lat > 0 ? `${lat}°N` : `${Math.abs(lat)}°S`);
-    }
+  const markers = d3.range(-70, 71, 10).filter(l => ![0, 23.5, -23.5].includes(l));
+  markers.forEach(lat => {
+    guidesLayer.append('path').datum(latLine(lat)).attr('class', 'latitude-line').attr('d', path);
+    const label = lat > 0 ? `${lat}°N` : `${Math.abs(lat)}°S`;
+    const lp = projection([-175, lat]);
+    const rp = projection([172, lat]);
+    if (lp) guidesLayer.append('text').attr('class', 'latitude-label')
+      .attr('x', lp[0] + 4).attr('y', lp[1] - 3).text(label);
+    if (rp) guidesLayer.append('text').attr('class', 'latitude-label')
+      .attr('x', rp[0] - 4).attr('y', rp[1] - 3).attr('text-anchor', 'end').text(label);
   });
 }
 
+// ── Zoom ──────────────────────────────────────────────────────────────────────
+
 function setupZoom() {
-  const zoom = d3
-    .zoom()
+  const zoom = d3.zoom()
     .scaleExtent([1, 10])
-    .translateExtent([
-      [-width * 0.5, -height * 0.5],
-      [width * 1.5, height * 1.5],
-    ])
-    .on('zoom', (event) => {
+    .translateExtent([[-width * 0.5, -height * 0.5], [width * 1.5, height * 1.5]])
+    .on('zoom', event => {
       currentZoom.transform = event.transform;
       viewportLayer.attr('transform', event.transform);
     });
@@ -290,34 +254,30 @@ function setupZoom() {
   svg.call(zoom).call(zoom.transform, d3.zoomIdentity);
 }
 
+// ── Init ──────────────────────────────────────────────────────────────────────
+
 async function init() {
   sphereLayer.append('path').datum({ type: 'Sphere' }).attr('class', 'sphere').attr('d', path);
-
-  renderLatitudeGuides();
+  renderGuides();
 
   const topology = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
-
-  countries = topojson
-    .feature(topology, topology.objects.countries)
-    .features.filter((feature) => countryName(feature) !== 'Antarctica');
+  countries = topojson.feature(topology, topology.objects.countries).features
+    .filter(f => countryName(f) !== 'Antarctica');
 
   populateSelector(countries);
 
-  baseLayer
-    .selectAll('.country')
-    .data(countries)
-    .join('path')
-    .attr('class', 'country')
-    .attr('d', path)
-    .on('click', (_, feature) => setActiveCountry(feature))
-    .append('title')
-    .text((d) => countryName(d));
+  baseLayer.selectAll('.country').data(countries).join('path')
+    .attr('class', 'country').attr('d', path)
+    .on('click', (_, f) => setActiveCountry(f))
+    .append('title').text(d => countryName(d));
 
   setupZoom();
-  updateDetails(null);
+  updateCard(null);
 }
 
-init().catch((error) => {
-  console.error('Unable to load world map data', error);
-  details.textContent = 'Could not load map data. Please check your network connection and refresh.';
+init().catch(err => {
+  console.error('Failed to load map data', err);
+  document.getElementById('country-card').hidden = true;
+  document.getElementById('edu-text').textContent =
+    'Could not load map data. Please check your network connection and refresh.';
 });

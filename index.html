@@ -3,44 +3,101 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>True Country Size Explorer</title>
+    <title>True Size Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
   </head>
   <body>
-    <main class="app-shell">
-      <header>
-        <h1>True Country Size Explorer</h1>
-        <p>
-          Drag countries to compare size in different places. Overlays are latitude-corrected, and
-          map guides show Equator/Tropics plus horizontal latitude lines.
-        </p>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="header-brand">
+          <svg class="header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <div>
+            <h1>True Size Explorer</h1>
+            <p class="header-subtitle">Drag countries to see their real size — corrected for Mercator distortion</p>
+          </div>
+        </div>
+        <div class="header-meta" id="edu-banner">
+          <span class="edu-icon">💡</span>
+          <span id="edu-text">The Mercator projection makes countries near the poles appear far larger than they really are. Try dragging Greenland to the equator!</span>
+        </div>
       </header>
 
-      <section class="controls" aria-label="Map controls">
-        <label for="country-select">Country</label>
-        <select id="country-select">
-          <option value="">Select a country…</option>
-        </select>
-        <button id="clear-overlays" type="button">Clear overlays</button>
-        <p id="details" class="details-inline">Select a country to view details.</p>
-      </section>
+      <div class="main-layout">
+        <aside class="sidebar">
+          <div class="sidebar-section">
+            <label class="field-label" for="country-select">Select Country</label>
+            <select id="country-select">
+              <option value="">Choose a country…</option>
+            </select>
+          </div>
 
-      <section class="map-panel">
-        <svg id="map" role="img" aria-label="Interactive world map"></svg>
-      </section>
+          <div class="sidebar-section" id="country-card" hidden>
+            <div class="country-card">
+              <div class="country-name" id="card-name">—</div>
+              <div class="country-stats">
+                <div class="stat">
+                  <span class="stat-label">True Area</span>
+                  <span class="stat-value" id="card-area">—</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">Overlay Latitude</span>
+                  <span class="stat-value" id="card-lat">—</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">Mercator Distortion</span>
+                  <span class="stat-value" id="card-scale">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
 
-      <section class="legend">
-        <h2>How to use</h2>
-        <ol>
-          <li>Pick a country from the dropdown (or click one on the map).</li>
-          <li>Drag the dashed outline onto another region.</li>
-          <li>Use mouse-wheel / trackpad to zoom and drag the background to pan.</li>
-          <li>Use Equator/Tropics/latitude guides for cleaner comparison by latitude.</li>
-        </ol>
-      </section>
-    </main>
+          <div class="sidebar-section">
+            <button id="clear-overlays" type="button" class="btn-secondary">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M2 4h12M6 4V2h4v2M13 4l-1 10H4L3 4"/>
+              </svg>
+              Clear all overlays
+            </button>
+          </div>
+
+          <div class="sidebar-section guide-section">
+            <h2>How it works</h2>
+            <ol class="guide-steps">
+              <li><strong>Click</strong> a country on the map or use the dropdown.</li>
+              <li><strong>Drag</strong> the dashed outline to any location.</li>
+              <li>The shape <strong>rescales</strong> as it moves to show its true relative size.</li>
+              <li><strong>Scroll</strong> to zoom, drag the map to pan.</li>
+            </ol>
+
+            <div class="legend-lines">
+              <div class="legend-item">
+                <span class="legend-swatch equator"></span> Equator
+              </div>
+              <div class="legend-item">
+                <span class="legend-swatch tropic"></span> Tropics (±23.5°)
+              </div>
+              <div class="legend-item">
+                <span class="legend-swatch arctic"></span> Polar Circles (±66.5°)
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="map-panel">
+          <svg id="map" role="img" aria-label="Interactive world map"></svg>
+          <div class="map-hint" id="map-hint">Click a country to begin</div>
+        </section>
+      </div>
+    </div>
 
     <script src="script.js"></script>
   </body>
