@@ -127,16 +127,15 @@ function createDraggableOverlay(feature) {
   const overlayGroup = overlayLayer.append('g').datum(overlayData).attr('class', 'overlay-group');
   const overlayPath = overlayGroup.append('path').attr('class', 'overlay-country').attr('d', path(feature));
 
-  // Track the visual centroid (path.centroid) as the drag pivot. Using the projected
-  // geo-centroid instead causes jumpiness: for large or multi-polygon countries,
-  // path.centroid and projection(geo-centroid) diverge, so each drag step applies the
-  // delta to the wrong anchor point. By keeping pivot in sync with path.centroid, the
-  // drag always moves the visible overlay center by exactly (dx, dy).
-  let [pivotX, pivotY] = path.centroid(feature);
-  if (!isFinite(pivotX) || !isFinite(pivotY)) [pivotX, pivotY] = projection(sourceCentroid);
+  // Accumulate drag deltas in viewport space. Re-deriving the pivot from path.centroid
+  // each frame causes northward drift because the 2D projected centroid and the
+  // spherical geo-centroid diverge for large countries — the error compounds every event.
+  // Accumulating (dx, dy) directly gives a stable, drift-free reference.
+  const initialCentroid = path.centroid(feature);
+  let pivotX = isFinite(initialCentroid[0]) ? initialCentroid[0] : projection(sourceCentroid)[0];
+  let pivotY = isFinite(initialCentroid[1]) ? initialCentroid[1] : projection(sourceCentroid)[1];
 
   function applyScale() {
-    if (!isFinite(pivotX) || !isFinite(pivotY)) return;
     overlayGroup.attr(
       'transform',
       `translate(${pivotX},${pivotY}) scale(${overlayData.xScale},${overlayData.yScale}) translate(${-pivotX},${-pivotY})`,
@@ -146,9 +145,10 @@ function createDraggableOverlay(feature) {
   overlayPath.call(
     d3.drag().on('drag', (event) => {
       const zoomFactor = 1 / currentZoom.transform.k;
-      const nextScreen = [pivotX + event.dx * zoomFactor, pivotY + event.dy * zoomFactor];
-      const nextLonLat = projection.invert(nextScreen);
+      pivotX += event.dx * zoomFactor;
+      pivotY += event.dy * zoomFactor;
 
+      const nextLonLat = projection.invert([pivotX, pivotY]);
       if (!nextLonLat) return;
 
       targetLon = wrapLongitude(nextLonLat[0]);
@@ -157,11 +157,6 @@ function createDraggableOverlay(feature) {
       overlayData.transformedFeature = translatedFeature(feature, targetLon, targetLat);
       ({ xScale: overlayData.xScale, yScale: overlayData.yScale } = mercatorScales(sourceLat, targetLat));
       overlayPath.attr('d', path(overlayData.transformedFeature));
-
-      // Sync pivot to the new visual centroid before applying the scale transform.
-      const c = path.centroid(overlayData.transformedFeature);
-      if (isFinite(c[0]) && isFinite(c[1])) [pivotX, pivotY] = c;
-
       applyScale();
       updateDetails(feature, targetLat);
     }),
