@@ -56,14 +56,19 @@ function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
 }
 
-// Correct Mercator scaling: ratio of cosines gives the true-size correction.
-// When moving a country from sourceLat to targetLat, the Mercator projection
-// stretches latitudes by 1/cos(lat). To display at true relative size we
-// multiply by cos(targetLat)/cos(sourceLat).
+// Mercator renders a country at latitude φ with area ∝ A_true / cos²(φ).
+// After translating coordinates to targetLat, D3 renders the shape with
+// x-extent unchanged but y-extent scaled by cos(sourceLat)/cos(targetLat).
+// Net translated pixel area = A_true / (cos(sourceLat) * cos(targetLat)).
+// Desired pixel area (true size at targetLat) = A_true / cos²(targetLat).
+// Required uniform scale s where s² = cos(sourceLat) / cos(targetLat),
+// so s = sqrt(cos(sourceLat) / cos(targetLat)).
+// High→low latitude (e.g. Greenland→Brazil): sourceCos < targetCos → s < 1 (shrinks). ✓
+// Low→high latitude (e.g. Brazil→Greenland): sourceCos > targetCos → s > 1 (grows). ✓
 function linearMercatorScale(sourceLat, targetLat) {
   const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.08);
   const targetCos = Math.max(Math.cos(toRadians(targetLat)), 0.08);
-  return Math.max(0.1, Math.min(10, targetCos / sourceCos));
+  return Math.max(0.1, Math.min(8, Math.sqrt(sourceCos / targetCos)));
 }
 
 function translateCoordinates(coords, dLon, dLat) {
