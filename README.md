@@ -5,7 +5,7 @@ An interactive world map UI for **true country size comparison**.
 ## Features
 
 - Click/select a country to create a draggable overlay.
-- Drag overlays across the map; overlay size auto-corrects with latitude (with safe scaling limits to avoid extreme blow-up near poles).
+- Drag overlays across the map with geometry-preserving latitude/longitude repositioning, so size comparisons (e.g., Greenland vs India) stay realistic across latitudes.
 - Zoom in/out and pan to inspect comparisons in much larger detail.
 - Equator, Tropic of Cancer, Tropic of Capricorn, and horizontal latitude guides are visible on the map.
 - Country details appear inline in the top controls next to **Clear overlays**.

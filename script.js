@@ -1,9 +1,7 @@
 const width = 1800;
 const height = 1000;
 const earthSurfaceKm2 = 510_072_000;
-const maxRenderableLatitude = 75;
-const minCorrectionScale = 0.45;
-const maxCorrectionScale = 3.2;
+const maxRenderableLatitude = 80;
 
 const svg = d3
   .select('#map')
@@ -45,78 +43,89 @@ function countryName(feature) {
   return feature.properties.name || feature.properties.admin || `Country ${feature.id}`;
 }
 
-function toRadians(degrees) {
-  return (degrees * Math.PI) / 180;
-}
-
-function mercatorCorrectionScale(sourceLat, currentLat) {
-  const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.08);
-  const currentCos = Math.max(Math.cos(toRadians(currentLat)), 0.08);
-  const rawScale = sourceCos / currentCos;
-  return Math.max(minCorrectionScale, Math.min(maxCorrectionScale, rawScale));
+function wrapLongitude(lon) {
+  const wrapped = ((lon + 180) % 360 + 360) % 360 - 180;
+  return wrapped === -180 ? 180 : wrapped;
 }
 
 function clampLatitude(latitude) {
   return Math.max(-maxRenderableLatitude, Math.min(maxRenderableLatitude, latitude));
 }
 
-function updateDetails(feature, dynamicLat = null) {
+function translateCoordinates(coords, dLon, dLat) {
+  if (typeof coords[0] === 'number') {
+    return [wrapLongitude(coords[0] + dLon), clampLatitude(coords[1] + dLat)];
+  }
+  return coords.map((point) => translateCoordinates(point, dLon, dLat));
+}
+
+function translatedFeature(originalFeature, targetLon, targetLat) {
+  const [sourceLon, sourceLat] = d3.geoCentroid(originalFeature);
+  const dLon = targetLon - sourceLon;
+  const dLat = targetLat - sourceLat;
+
+  return {
+    type: 'Feature',
+    id: originalFeature.id,
+    properties: { ...originalFeature.properties },
+    geometry: {
+      ...originalFeature.geometry,
+      coordinates: translateCoordinates(originalFeature.geometry.coordinates, dLon, dLat),
+    },
+  };
+}
+
+function updateDetails(feature, currentLat = null) {
   if (!feature) {
     details.textContent = 'Select a country to view details.';
     return;
   }
 
   const km2 = steradianToKm2(d3.geoArea(feature));
-  const [, sourceLat] = d3.geoCentroid(feature);
-  const currentLat = dynamicLat ?? sourceLat;
-  const correction = mercatorCorrectionScale(sourceLat, currentLat);
+  const centroid = d3.geoCentroid(feature);
+  const lat = currentLat ?? centroid[1];
 
   details.textContent = `${countryName(feature)} · True area: ${formatKm2(
     km2,
-  )} km² · Overlay latitude: ${currentLat.toFixed(1)}° · Correction: ${correction.toFixed(2)}×`;
-}
-
-function applyOverlayTransform(group, state) {
-  group.attr(
-    'transform',
-    `translate(${state.tx},${state.ty}) translate(${state.cx},${state.cy}) scale(${state.scale}) translate(${-state.cx},${-state.cy})`,
-  );
-}
-
-function getOverlayLat(state) {
-  const mapX = state.cx + state.tx;
-  const mapY = state.cy + state.ty;
-  const lonLat = projection.invert([mapX, mapY]);
-  return lonLat ? clampLatitude(lonLat[1]) : state.sourceLat;
+  )} km² · Overlay latitude: ${lat.toFixed(1)}°`;
 }
 
 function createDraggableOverlay(feature) {
   baseLayer.selectAll('.country').classed('selected', (d) => d === feature);
 
-  const [cx, cy] = path.centroid(feature);
-  const [, sourceLat] = d3.geoCentroid(feature);
+  const sourceCentroid = d3.geoCentroid(feature);
+  let [targetLon, targetLat] = sourceCentroid;
 
-  const state = { tx: 0, ty: 0, cx, cy, sourceLat, scale: 1 };
+  const overlayData = {
+    originalFeature: feature,
+    transformedFeature: feature,
+  };
 
-  const group = overlayLayer.append('g').datum(feature).attr('class', 'overlay-group');
+  const overlayPath = overlayLayer
+    .append('path')
+    .datum(overlayData)
+    .attr('class', 'overlay-country')
+    .attr('d', path(feature));
 
-  group.append('path').attr('class', 'overlay-country').attr('d', path);
-
-  group.call(
+  overlayPath.call(
     d3.drag().on('drag', (event) => {
-      const factor = 1 / currentZoom.transform.k;
-      state.tx += event.dx * factor;
-      state.ty += event.dy * factor;
+      const zoomFactor = 1 / currentZoom.transform.k;
+      const [cx, cy] = projection([targetLon, targetLat]);
+      const nextScreen = [cx + event.dx * zoomFactor, cy + event.dy * zoomFactor];
+      const nextLonLat = projection.invert(nextScreen);
 
-      const currentLat = getOverlayLat(state);
-      state.scale = mercatorCorrectionScale(state.sourceLat, currentLat);
-      updateDetails(feature, currentLat);
+      if (!nextLonLat) {
+        return;
+      }
 
-      applyOverlayTransform(group, state);
+      targetLon = wrapLongitude(nextLonLat[0]);
+      targetLat = clampLatitude(nextLonLat[1]);
+
+      overlayData.transformedFeature = translatedFeature(feature, targetLon, targetLat);
+      overlayPath.attr('d', path(overlayData.transformedFeature));
+      updateDetails(feature, targetLat);
     }),
   );
-
-  applyOverlayTransform(group, state);
 }
 
 function populateSelector(features) {
