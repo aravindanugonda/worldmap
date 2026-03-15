@@ -56,19 +56,22 @@ function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
 }
 
-// Mercator renders a country at latitude φ with area ∝ A_true / cos²(φ).
-// After translating coordinates to targetLat, D3 renders the shape with
-// x-extent unchanged but y-extent scaled by cos(sourceLat)/cos(targetLat).
-// Net translated pixel area = A_true / (cos(sourceLat) * cos(targetLat)).
-// Desired pixel area (true size at targetLat) = A_true / cos²(targetLat).
-// Required uniform scale s where s² = cos(sourceLat) / cos(targetLat),
-// so s = sqrt(cos(sourceLat) / cos(targetLat)).
-// High→low latitude (e.g. Greenland→Brazil): sourceCos < targetCos → s < 1 (shrinks). ✓
-// Low→high latitude (e.g. Brazil→Greenland): sourceCos > targetCos → s > 1 (grows). ✓
-function linearMercatorScale(sourceLat, targetLat) {
+// On Mercator, pixel_width = R·Δλ (latitude-independent), so a country at sourceLat
+// spanning Δλ degrees represents cos(sourceLat)·Δλ km east-west. After translating
+// coordinates to targetLat, D3 still renders width as R·Δλ, which now looks like a
+// country spanning Δλ km at the equator — too wide by 1/cos(sourceLat). To show the
+// true east-west extent at targetLat's Mercator scale, scale x by cos(sourceLat)/cos(targetLat).
+//
+// Height (latitude arc) is independent of longitude, and after translating to targetLat
+// D3 renders Δφ/cos(targetLat) — exactly the same distortion as any native country at
+// targetLat — so no y correction is needed (yScale = 1).
+function mercatorScales(sourceLat, targetLat) {
   const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.08);
   const targetCos = Math.max(Math.cos(toRadians(targetLat)), 0.08);
-  return Math.max(0.1, Math.min(8, Math.sqrt(sourceCos / targetCos)));
+  return {
+    xScale: Math.max(0.1, Math.min(8, sourceCos / targetCos)),
+    yScale: 1,
+  };
 }
 
 function translateCoordinates(coords, dLon, dLat) {
@@ -117,7 +120,8 @@ function createDraggableOverlay(feature) {
   const overlayData = {
     originalFeature: feature,
     transformedFeature: feature,
-    scale: 1,
+    xScale: 1,
+    yScale: 1,
   };
 
   const overlayGroup = overlayLayer.append('g').datum(overlayData).attr('class', 'overlay-group');
@@ -128,7 +132,7 @@ function createDraggableOverlay(feature) {
     if (!isFinite(centroid[0]) || !isFinite(centroid[1])) return;
     overlayGroup.attr(
       'transform',
-      `translate(${centroid[0]},${centroid[1]}) scale(${overlayData.scale}) translate(${-centroid[0]},${-centroid[1]})`,
+      `translate(${centroid[0]},${centroid[1]}) scale(${overlayData.xScale},${overlayData.yScale}) translate(${-centroid[0]},${-centroid[1]})`,
     );
   }
 
@@ -145,7 +149,7 @@ function createDraggableOverlay(feature) {
       targetLat = clampLatitude(nextLonLat[1]);
 
       overlayData.transformedFeature = translatedFeature(feature, targetLon, targetLat);
-      overlayData.scale = linearMercatorScale(sourceLat, targetLat);
+      ({ xScale: overlayData.xScale, yScale: overlayData.yScale } = mercatorScales(sourceLat, targetLat));
       overlayPath.attr('d', path(overlayData.transformedFeature));
       applyScale();
       updateDetails(feature, targetLat);
