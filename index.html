@@ -13,9 +13,8 @@
       <header>
         <h1>True Country Size Explorer</h1>
         <p>
-          The base map is Mercator (like most web maps), but draggable overlays are
-          <strong>latitude-corrected</strong> while you move them north/south. This gives a much
-          truer visual size comparison between countries.
+          Drag countries to compare size in different places. Overlays are latitude-corrected, and
+          map guides show Equator/Tropics plus horizontal latitude lines.
         </p>
       </header>
 
@@ -25,6 +24,7 @@
           <option value="">Select a country…</option>
         </select>
         <button id="clear-overlays" type="button">Clear overlays</button>
+        <p id="details" class="details-inline">Select a country to view details.</p>
       </section>
 
       <section class="map-panel">
@@ -36,12 +36,9 @@
         <ol>
           <li>Pick a country from the dropdown (or click one on the map).</li>
           <li>Drag the dashed outline onto another region.</li>
-          <li>
-            As you drag north/south, overlay scale updates automatically to compensate for
-            Mercator distortion.
-          </li>
+          <li>Use mouse-wheel / trackpad to zoom and drag the background to pan.</li>
+          <li>Use Equator/Tropics/latitude guides for cleaner comparison by latitude.</li>
         </ol>
-        <p id="details">Select a country to view details.</p>
       </section>
     </main>
 
