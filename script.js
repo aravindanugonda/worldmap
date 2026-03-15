@@ -52,6 +52,17 @@ function clampLatitude(latitude) {
   return Math.max(-maxRenderableLatitude, Math.min(maxRenderableLatitude, latitude));
 }
 
+function toRadians(degrees) {
+  return (degrees * Math.PI) / 180;
+}
+
+function linearMercatorScale(sourceLat, targetLat) {
+  const sourceCos = Math.max(Math.cos(toRadians(sourceLat)), 0.08);
+  const targetCos = Math.max(Math.cos(toRadians(targetLat)), 0.08);
+  const raw = targetCos / sourceCos;
+  return Math.max(0.2, Math.min(4, raw));
+}
+
 function translateCoordinates(coords, dLon, dLat) {
   if (typeof coords[0] === 'number') {
     return [wrapLongitude(coords[0] + dLon), clampLatitude(coords[1] + dLat)];
@@ -94,18 +105,25 @@ function createDraggableOverlay(feature) {
   baseLayer.selectAll('.country').classed('selected', (d) => d === feature);
 
   const sourceCentroid = d3.geoCentroid(feature);
+  const sourceLat = sourceCentroid[1];
   let [targetLon, targetLat] = sourceCentroid;
 
   const overlayData = {
     originalFeature: feature,
     transformedFeature: feature,
+    scale: 1,
   };
 
-  const overlayPath = overlayLayer
-    .append('path')
-    .datum(overlayData)
-    .attr('class', 'overlay-country')
-    .attr('d', path(feature));
+  const overlayGroup = overlayLayer.append('g').datum(overlayData).attr('class', 'overlay-group');
+  const overlayPath = overlayGroup.append('path').attr('class', 'overlay-country').attr('d', path(feature));
+
+  function applyScale() {
+    const centroid = path.centroid(overlayData.transformedFeature);
+    overlayGroup.attr(
+      'transform',
+      `translate(${centroid[0]},${centroid[1]}) scale(${overlayData.scale}) translate(${-centroid[0]},${-centroid[1]})`,
+    );
+  }
 
   overlayPath.call(
     d3.drag().on('drag', (event) => {
@@ -122,10 +140,14 @@ function createDraggableOverlay(feature) {
       targetLat = clampLatitude(nextLonLat[1]);
 
       overlayData.transformedFeature = translatedFeature(feature, targetLon, targetLat);
+      overlayData.scale = linearMercatorScale(sourceLat, targetLat);
       overlayPath.attr('d', path(overlayData.transformedFeature));
+      applyScale();
       updateDetails(feature, targetLat);
     }),
   );
+
+  applyScale();
 }
 
 function populateSelector(features) {
